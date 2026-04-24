@@ -3,106 +3,95 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
+# Page Settings
 st.set_page_config(page_title="Pro Ledger", layout="centered", page_icon="🏦")
 
-# --- Connection ---
+# Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- Session State for Login ---
+# Session State
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
     st.session_state['username'] = ""
 
 # --- LOGIN / SIGNUP LOGIC ---
-def login_user(user, pwd):
-    try:
-        users_df = conn.read(worksheet="Users", ttl=0)
-        user_data = users_df[(users_df['Username'] == user) & (users_df['Password'] == pwd)]
-        if not user_data.empty:
-            return True
-    except:
-        return False
-    return False
-
-def signup_user(new_user, new_pwd):
-    try:
-        users_df = conn.read(worksheet="Users", ttl=0)
-        if new_user in users_df['Username'].values:
-            return "Exists"
-        
-        new_row = pd.DataFrame([{"Username": new_user, "Password": new_pwd}])
-        updated_users = pd.concat([users_df, new_row], ignore_index=True)
-        conn.update(worksheet="Users", data=updated_users)
-        return "Success"
-    except:
-        # Agar sheet khali ho
-        new_row = pd.DataFrame([{"Username": new_user, "Password": new_pwd}])
-        conn.update(worksheet="Users", data=new_row)
-        return "Success"
-
-# --- AUTHENTICATION UI ---
 if not st.session_state['logged_in']:
-    tab1, tab2 = st.tabs(["🔑 Login", "📝 Sign Up"])
+    st.markdown("<h2 style='text-align: center;'>🔐 Member Access</h2>", unsafe_allow_html=True)
+    tab1, tab2 = st.tabs(["🔑 Login", "📝 Create Account"])
     
     with tab1:
-        user = st.text_input("Username", key="l_user")
-        pwd = st.text_input("Password", type="password", key="l_pwd")
+        u = st.text_input("Username", key="login_user")
+        p = st.text_input("Password", type="password", key="login_pass")
         if st.button("Login"):
-            if login_user(user, pwd):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = user
-                st.rerun()
-            else:
-                st.error("Ghalat Username ya Password")
+            users_df = conn.read(worksheet="Users", ttl=0)
+            if not users_df.empty and u in users_df['Username'].values:
+                # Password check logic
+                stored_pwd = users_df[users_df['Username'] == u]['Password'].values[0]
+                if str(p) == str(stored_pwd):
+                    st.session_state['logged_in'] = True
+                    st.session_state['username'] = u
+                    st.rerun()
+                else: st.error("Password ghalat hai!")
+            else: st.error("User nahi mila! Pehle Sign Up karein.")
 
     with tab2:
-        new_user = st.text_input("Choose Username", key="s_user")
-        new_pwd = st.text_input("Choose Password", type="password", key="s_pwd")
-        if st.button("Create Account"):
-            result = signup_user(new_user, new_pwd)
-            if result == "Success":
-                st.success("Account ban gaya! Ab Login tab mein jayein.")
-            elif result == "Exists":
-                st.warning("Ye Username pehle se maujood hai.")
-
+        new_u = st.text_input("New Username", key="reg_user")
+        new_p = st.text_input("New Password", type="password", key="reg_pass")
+        if st.button("Register Now"):
+            users_df = conn.read(worksheet="Users", ttl=0)
+            if not users_df.empty and new_u in users_df['Username'].values:
+                st.warning("Ye naam pehle se istemal mein hai.")
+            else:
+                new_user_data = pd.DataFrame([{"Username": new_u, "Password": new_p}])
+                updated_users = pd.concat([users_df, new_user_data], ignore_index=True)
+                conn.update(worksheet="Users", data=updated_users)
+                st.success("Account ban gaya! Ab Login tab mein ja kar login karein.")
     st.stop()
 
-# --- ACTUAL LEDGER (After Login) ---
+# --- MAIN DASHBOARD (After Login) ---
 st.title(f"🏦 {st.session_state['username']}'s Ledger")
-st.sidebar.button("Logout", on_click=lambda: st.session_state.update({"logged_in": False, "username": ""}))
+st.sidebar.write(f"Logged in as: **{st.session_state['username']}**")
+if st.sidebar.button("Logout"):
+    st.session_state.update({"logged_in": False, "username": ""})
+    st.rerun()
 
-# --- FORM ---
-with st.expander("➕ Add Transaction", expanded=True):
+# Transaction Form
+with st.expander("➕ Nayi Entry Shamil Karein", expanded=True):
     with st.form("entry_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        person = col1.text_input("Person Name")
-        amt = col1.number_input("Amount", min_value=0.0)
+        person = col1.text_input("Kise diye / Kis se liye?")
+        amt = col1.number_input("Raqam (Amount)", min_value=0.0)
         curr = col2.selectbox("Currency", ["PKR", "USD", "EUR"])
         cat = col2.radio("Type", ["Received (+)", "Sent (-)"])
+        date_v = st.date_input("Date", datetime.now())
+        reason = st.text_input("Wajah (Reason)")
         
-        date_val = st.date_input("Date", datetime.now())
-        reason = st.text_input("Reason")
-        submit = st.form_submit_button("Save Record")
+        if st.form_submit_button("Data Save Karein"):
+            # Pehle purana data read karein
+            all_data = conn.read(worksheet="Sheet1", ttl=0)
+            
+            # Nayi row taiyar karein
+            final_amt = amt if cat == "Received (+)" else -amt
+            new_entry = pd.DataFrame([{
+                "Owner": st.session_state['username'],
+                "Name": person, "Amount": final_amt, "Currency": curr,
+                "Type": cat, "Date": date_v.strftime("%Y-%m-%d"), "Reason": reason
+            }])
+            
+            # Update Sheet
+            updated_sheet = pd.concat([all_data, new_entry], ignore_index=True)
+            conn.update(worksheet="Sheet1", data=updated_sheet)
+            st.success("Record mehfooz ho gaya!")
+            st.balloons()
 
-if submit and person and amt > 0:
-    # Main Transaction Sheet Read karein (Sheet1)
-    df = conn.read(worksheet="Sheet1", ttl=0)
-    
-    final_amt = amt if cat == "Received (+)" else -amt
-    new_entry = pd.DataFrame([{
-        "Owner": st.session_state['username'], # User ka naam save ho raha hai
-        "Name": person, "Amount": final_amt, "Currency": curr,
-        "Type": cat, "Date": date_val.strftime("%Y-%m-%d"), "Reason": reason
-    }])
-    
-    updated_df = pd.concat([df, new_entry], ignore_index=True)
-    conn.update(worksheet="Users", data=updated_df) # Note: Yahan worksheet check karein
-    st.success("Saved!")
-    st.balloons()
-
-# --- HISTORY ---
-if st.checkbox("Show My History"):
+# History Section
+st.markdown("---")
+if st.checkbox("📖 Meri History Dekhein"):
     history = conn.read(worksheet="Sheet1", ttl=0)
-    # Sirf us bande ka data dikhao jo login hai
-    user_history = history[history['Owner'] == st.session_state['username']]
-    st.dataframe(user_history.sort_values("Date", ascending=False))
+    # SECURITY FILTER: Sirf login bande ka data filter karein
+    my_records = history[history['Owner'] == st.session_state['username']]
+    
+    if not my_records.empty:
+        st.dataframe(my_records.sort_values("Date", ascending=False), use_container_width=True)
+    else:
+        st.info("Aapka abhi tak koi record nahi hai.")
