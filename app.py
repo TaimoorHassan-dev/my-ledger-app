@@ -6,11 +6,14 @@ from datetime import datetime
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="Zarkash Ledger", layout="centered", page_icon="💰")
 
-# Custom CSS for Premium Look
+# Custom CSS for Styling
 st.markdown("""
     <style>
-    .main-title { color: #FFD700; text-align: center; font-size: 35px; font-weight: bold; margin-bottom: 20px; }
-    .stButton>button { width: 100%; border-radius: 10px; background-color: #FFD700; color: black; }
+    .main-title { color: #FFD700; text-align: center; font-size: 35px; font-weight: bold; }
+    /* Minus amount ko red dikhane ke liye */
+    .minus-text { color: #ff4b4b; font-weight: bold; }
+    /* Plus amount ko green dikhane ke liye */
+    .plus-text { color: #00ff00; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -20,91 +23,94 @@ if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
     st.session_state['username'] = ""
 
-# --- AUTHENTICATION ---
+# --- AUTHENTICATION (Login/Signup) ---
 if not st.session_state['logged_in']:
     st.markdown("<h1 class='main-title'>✨ Zarkash Ledger</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
-    
     with tab1:
-        l_user = st.text_input("Username", key="l_user")
-        l_pass = st.text_input("Password", type="password", key="l_pass")
+        u = st.text_input("Username", key="l_u")
+        p = st.text_input("Password", type="password", key="l_p")
         if st.button("Login"):
-            users_df = conn.read(worksheet="Users", ttl=0)
-            if not users_df.empty and l_user in users_df['Username'].values:
-                correct_pass = users_df[users_df['Username'] == l_user]['Password'].values[0]
-                if str(l_pass) == str(correct_pass):
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = l_user
+            users = conn.read(worksheet="Users", ttl=0)
+            if not users.empty and u in users['Username'].values:
+                if str(p) == str(users[users['Username'] == u]['Password'].values[0]):
+                    st.session_state.update({"logged_in": True, "username": u})
                     st.rerun()
-                else: st.error("❌ Password ghalat hai.")
-            else: st.error("❌ User nahi mila.")
-
+                else: st.error("Ghalat Password")
+            else: st.error("User nahi mila")
     with tab2:
-        s_user = st.text_input("New Username", key="s_user")
-        s_pass = st.text_input("New Password", type="password", key="s_pass")
-        if st.button("Create Account"):
-            if s_user and s_pass:
-                users_df = conn.read(worksheet="Users", ttl=0)
-                if s_user in users_df['Username'].values:
-                    st.warning("Username pehle se maujood hai.")
-                else:
-                    new_u = pd.DataFrame([{"Username": s_user, "Password": s_pass}])
-                    conn.update(worksheet="Users", data=pd.concat([users_df, new_u], ignore_index=True))
-                    st.success("✅ Account ban gaya! Ab Login karein.")
-            else: st.warning("Fields bharein.")
+        nu, np = st.text_input("New Username", key="s_u")
+        if st.button("Register"):
+            users = conn.read(worksheet="Users", ttl=0)
+            if nu in users['Username'].values: st.warning("Username taken")
+            else:
+                conn.update(worksheet="Users", data=pd.concat([users, pd.DataFrame([{"Username": nu, "Password": "123"}])], ignore_index=True))
+                st.success("Registered!")
     st.stop()
 
-# --- MAIN LEDGER ---
+# --- MAIN DASHBOARD ---
 st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username']}'s Ledger</h1>", unsafe_allow_html=True)
 
-with st.expander("➕ Nayi Entry Karein", expanded=True):
+# Data Reading
+all_data = conn.read(worksheet="Sheet1", ttl=0)
+my_data = all_data[all_data['Owner'] == st.session_state['username']]
+
+# --- CALCULATION LOGIC (Addition & Subtraction) ---
+if not my_data.empty:
+    # Received (+) ko jama karein
+    total_in = my_data[my_data['Amount'] > 0]['Amount'].sum()
+    # Sent (-) ko jama karein (lekin display ke liye positive dikhayenge)
+    total_out = abs(my_data[my_data['Amount'] < 0]['Amount'].sum())
+    # Asli Balance: IN - OUT
+    net_balance = total_in - total_out
+
+    st.markdown("### 📊 Hisab Kitab Summary")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Kul Aamad (+)", f"{total_in:,}")
+    c2.metric("Kul Kharcha (-)", f"{total_out:,}", delta_color="inverse")
+    
+    # Balance agar negative ho jaye toh red dikhayega
+    st.metric("Maujooda Balance", f"{net_balance:,}", delta=net_balance, delta_color="normal")
+    st.markdown("---")
+
+# --- TRANSACTION FORM ---
+with st.expander("➕ Nayi Entry (Aamad ya Kharcha)", expanded=True):
     with st.form("ledger_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        person = col1.text_input("Naam (Name)")
+        person = col1.text_input("Naam")
         amount = col1.number_input("Raqam (Amount)", min_value=0.0)
-        t_date = st.date_input("Date", datetime.now())
         
-        t_type = col2.radio("Type", ["Received (+)", "Sent (-)"])
-        currency = col2.selectbox("Currency", ["PKR", "USD", "AED"])
-        t_time = col2.time_input("Time", datetime.now().time())
-        
+        # Yahan se "Sent (-)" select karne par minus logic chalegi
+        t_type = col2.radio("Naoiyat (Type)", ["Received (+)", "Sent (-)"])
+        date_v = st.date_input("Tareekh", datetime.now())
         reason = st.text_input("Wajah (Reason)")
-        save_btn = st.form_submit_button("Save Record")
+        
+        if st.form_submit_button("Save Record"):
+            if person and amount > 0:
+                # LOGIC: Agar "Sent" hai toh raqam ke saath (-) laga do
+                final_amt = amount if t_type == "Received (+)" else -amount
+                
+                new_row = pd.DataFrame([{
+                    "Owner": st.session_state['username'],
+                    "Name": person,
+                    "Amount": final_amt,
+                    "Currency": "PKR",
+                    "Type": t_type,
+                    "Date": date_v.strftime("%Y-%m-%d"),
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Reason": reason
+                }])
+                conn.update(worksheet="Sheet1", data=pd.concat([all_data, new_row], ignore_index=True))
+                st.success(f"Record mehfooz! {'Minus' if final_amt < 0 else 'Plus'} entry ho gayi.")
+                st.rerun()
+            else: st.error("Naam aur Raqam likhna zaroori hai!")
 
-if save_btn:
-    if not person or amount <= 0 or not reason:
-        st.error("⚠️ Sab fields bharna zaroori hain!")
-    else:
-        try:
-            # Aik hi main sheet read hogi (Sheet1)
-            main_df = conn.read(worksheet="Sheet1", ttl=0)
-            final_amt = amount if t_type == "Received (+)" else -amount
-            
-            new_record = pd.DataFrame([{
-                "Owner": st.session_state['username'], # Ye pehchan hai ke data kis ka hai
-                "Name": person, "Amount": final_amt, "Currency": currency,
-                "Type": t_type, "Date": t_date.strftime("%Y-%m-%d"),
-                "Time": t_time.strftime("%H:%M:%S"), "Reason": reason
-            }])
-            
-            conn.update(worksheet="Sheet1", data=pd.concat([main_df, new_record], ignore_index=True))
-            st.success("✅ Record save ho gaya!")
-            st.balloons()
-        except:
-            st.error("Data save karne mein masla hua.")
+# --- HISTORY VIEW ---
+if st.checkbox("📖 Show Detail History"):
+    if not my_data.empty:
+        # Visual styling for dataframe
+        st.dataframe(my_data.sort_values(by=["Date"], ascending=False), use_container_width=True)
 
-# --- HISTORY WITH PRIVACY FILTER ---
-st.markdown("---")
-if st.checkbox("📖 Meri Transaction History"):
-    all_data = conn.read(worksheet="Sheet1", ttl=0)
-    if not all_data.empty:
-        # 🔒 Privacy Filter: Sirf wo data dikhao jahan Owner login wale user ke barabar ho
-        my_data = all_data[all_data['Owner'] == st.session_state['username']]
-        if not my_data.empty:
-            st.dataframe(my_data.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True)
-        else:
-            st.info("Aapka abhi tak koi record nahi hai.")
-
-if st.sidebar.button("Log Out"):
+if st.sidebar.button("Logout"):
     st.session_state.update({"logged_in": False, "username": ""})
     st.rerun()
