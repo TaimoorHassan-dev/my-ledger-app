@@ -2,155 +2,140 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
-# --- 1. APP CONFIGURATION (New Name & Icon) ---
+# --- 1. APP CONFIG & MOBILE ICON SETUP ---
+# Note: Mobile icon ke liye humne link inject kiya hai niche
 st.set_page_config(
     page_title="Zarkash Ledger", 
     layout="centered", 
-    page_icon="💰"  # Ye icon browser tab par nazar aayega
+    page_icon="💰" 
 )
 
-# --- 2. FORCED BRANDING REMOVAL & STYLING ---
+# Yeh code mobile browser ko bataye ga ke "Add to Home Screen" par naya icon use kare
+# Maine yahan aik professional gold-finance icon ka link dala hai
+st.markdown(
+    f"""
+    <link rel="apple-touch-icon" sizes="180x180" href="https://cdn-icons-png.flaticon.com/512/5839/5839888.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="https://cdn-icons-png.flaticon.com/512/5839/5839888.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="https://cdn-icons-png.flaticon.com/512/5839/5839888.png">
+    """,
+    unsafe_allow_html=True
+)
+
+# --- 2. FORCED BRANDING REMOVAL ---
 st.markdown("""
     <style>
-    /* Sab se pehle footer aur header ko block karein */
     header {visibility: hidden !important; display: none !important;}
     footer {visibility: hidden !important; display: none !important;}
     [data-testid="stHeader"], [data-testid="stFooter"], .stDeployButton {display: none !important;}
+    #MainMenu {visibility: hidden !important;}
     
-    /* App ki look professional banayein */
-    .main-title { color: #FFD700; text-align: center; font-size: 38px; font-weight: bold; margin-bottom: 5px; }
-    .sub-title { text-align: center; color: #888; font-size: 14px; margin-bottom: 25px; }
-    
-    /* Confirmation Card */
-    .confirm-card { 
-        background-color: #1e2433; padding: 20px; border: 2px solid #FFD700; 
-        border-radius: 12px; margin-bottom: 20px; 
-    }
-    
-    /* Standard UI fixes */
-    [data-testid="stMetricValue"] { font-size: 28px; font-weight: bold; }
+    .main-title { color: #FFD700; text-align: center; font-size: 35px; font-weight: bold; margin-bottom: 5px; }
     .stButton>button { width: 100%; border-radius: 25px; background-color: #FFD700; color: black; font-weight: bold; height: 50px; }
+    .confirm-card { background-color: #161a25; padding: 20px; border: 2px solid #FFD700; border-radius: 12px; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 3. REFRESH-PROOF (LOGIN PERSISTENCE) ---
-# URL parameters se user check karein
-q_params = st.query_params
-current_user_url = q_params.get("user", "")
+# --- 3. REFRESH-PROOF LOGIN ---
+query_params = st.query_params
+url_user = query_params.get("user", "")
 
 if 'logged_in' not in st.session_state:
-    if current_user_url:
-        st.session_state.update({'logged_in': True, 'username': current_user_url})
+    if url_user:
+        st.session_state.update({'logged_in': True, 'username': url_user})
     else:
         st.session_state.update({'logged_in': False, 'username': ""})
 
 if 'confirm_mode' not in st.session_state:
     st.session_state.update({'confirm_mode': False, 'temp_data': None})
 
-# --- 4. AUTHENTICATION SECTION ---
+# --- 4. AUTHENTICATION ---
 if not st.session_state['logged_in']:
     st.markdown("<h1 class='main-title'>✨ ZARKASH LEDGER</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-title'>Your Professional Finance Partner</p>", unsafe_allow_html=True)
-    
-    tab_login, tab_reg = st.tabs(["🔐 Login", "📝 Register"])
-    
-    with tab_login:
-        u_input = st.text_input("Username")
-        p_input = st.text_input("Password", type="password")
-        if st.button("Enter Dashboard"):
+    t1, t2 = st.tabs(["🔐 Login", "📝 Register"])
+    with t1:
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.button("Access Dashboard"):
             users = conn.read(worksheet="Users", ttl=0)
-            if not users.empty and u_input in users['Username'].values:
-                stored_p = str(users[users['Username'] == u_input]['Password'].values[0])
-                if str(p_input) == stored_p:
-                    st.session_state.update({'logged_in': True, 'username': u_input})
-                    st.query_params["user"] = u_input  # URL mein save karein
+            if not users.empty and u in users['Username'].values:
+                if str(p) == str(users[users['Username'] == u]['Password'].values[0]):
+                    st.session_state.update({'logged_in': True, 'username': u})
+                    st.query_params["user"] = u
                     st.rerun()
-                else: st.error("❌ Wrong Password")
-            else: st.error("❌ User not found")
-
-    with tab_reg:
-        nu = st.text_input("New User")
-        np = st.text_input("New Pass", type="password")
-        if st.button("Register Now"):
+    with t2:
+        nu = st.text_input("New Username")
+        np = st.text_input("New Password", type="password")
+        if st.button("Sign Up"):
             if nu and np:
                 users = conn.read(worksheet="Users", ttl=0)
-                if nu in users['Username'].values: st.warning("Name taken")
-                else:
-                    conn.update(worksheet="Users", data=pd.concat([users, pd.DataFrame([{"Username": nu, "Password": np}])], ignore_index=True))
-                    st.success("✅ Success! Please login.")
+                conn.update(worksheet="Users", data=pd.concat([users, pd.DataFrame([{"Username": nu, "Password": np}])], ignore_index=True))
+                st.success("Registered! Now Login.")
     st.stop()
 
 # --- 5. MAIN LEDGER ---
 st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}</h1>", unsafe_allow_html=True)
 
-# Data Fetching
-all_data = conn.read(worksheet="Sheet1", ttl=0)
-my_data = all_data[all_data['Owner'] == st.session_state['username']]
+all_recs = conn.read(worksheet="Sheet1", ttl=0)
+my_recs = all_recs[all_recs['Owner'] == st.session_state['username']]
 
-# --- PRE-SAVE CONFIRMATION VALIDATION ---
+# Confirmation Validation Logic
 if st.session_state['confirm_mode']:
-    t = st.session_state['temp_data']
-    st.warning("⚠️ **CHECK CAREFULLY BEFORE SAVING**")
+    preview = st.session_state['temp_data']
+    st.warning("⚠️ **CONFIRM DETAILS**")
     st.markdown(f"""
     <div class="confirm-card">
-        <b>Name:</b> {t['Name']}<br>
-        <b>Amount:</b> PKR {abs(t['Amount']):,.0f}<br>
-        <b>Type:</b> {t['Type']}<br>
-        <b>Reason:</b> {t['Reason']}
+        <b>Name:</b> {preview['Name']}<br>
+        <b>Amount:</b> PKR {abs(preview['Amount']):,.0f}<br>
+        <b>Type:</b> {preview['Type']}<br>
+        <b>Reason:</b> {preview['Reason']}
     </div>
     """, unsafe_allow_html=True)
     
-    c_y, c_n = st.columns(2)
-    if c_y.button("✅ Yes, Everything is Correct"):
-        conn.update(worksheet="Sheet1", data=pd.concat([all_data, pd.DataFrame([t])], ignore_index=True))
-        st.success("Transaction Locked!")
+    col_y, col_n = st.columns(2)
+    if col_y.button("✅ Save"):
+        conn.update(worksheet="Sheet1", data=pd.concat([all_recs, pd.DataFrame([preview])], ignore_index=True))
+        st.success("Saved!")
         st.session_state.update({'confirm_mode': False, 'temp_data': None})
         st.rerun()
-    if c_n.button("❌ No, Let me Change it"):
+    if col_n.button("❌ Edit"):
         st.session_state.update({'confirm_mode': False, 'temp_data': None})
         st.rerun()
     st.stop()
 
-# --- ENTRY FORM ---
+# Input Form
 with st.expander("➕ Add Transaction", expanded=True):
-    with st.form("ledger_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        p_name = col1.text_input("Person Name")
-        p_amt = col1.number_input("Amount (PKR)", min_value=0.0, step=500.0)
-        p_type = col2.radio("Type", ["Received (+)", "Sent (-)"])
-        p_date = col2.date_input("Date", datetime.now())
-        p_reason = st.text_input("Reason")
-        
+    with st.form("entry_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        n = c1.text_input("Person Name")
+        a = c1.number_input("Amount", min_value=0.0)
+        t = c2.radio("Type", ["Received (+)", "Sent (-)"])
+        r = st.text_input("Reason")
         if st.form_submit_button("Preview & Save"):
-            if p_name and p_amt > 0:
-                val = p_amt if p_type == "Received (+)" else -p_amt
+            if n and a > 0:
+                val = a if t == "Received (+)" else -a
                 st.session_state['temp_data'] = {
-                    "Owner": st.session_state['username'], "Name": p_name, 
-                    "Amount": val, "Currency": "PKR", "Type": p_type, 
-                    "Date": p_date.strftime("%Y-%m-%d"), 
-                    "Time": datetime.now().strftime("%H:%M:%S"), "Reason": p_reason
+                    "Owner": st.session_state['username'], "Name": n, "Amount": val, 
+                    "Type": t, "Date": datetime.now().strftime("%Y-%m-%d"), 
+                    "Time": datetime.now().strftime("%H:%M:%S"), "Reason": r
                 }
                 st.session_state['confirm_mode'] = True
                 st.rerun()
-            else: st.error("⚠️ Please fill details.")
 
-# Summary Metrics
-if not my_data.empty:
-    i = my_data[my_data['Amount'] > 0]['Amount'].sum()
-    o = abs(my_data[my_data['Amount'] < 0]['Amount'].sum())
-    st.markdown("### 📊 Status")
-    st.columns(3)[0].metric("Income", f"{i:,.0f}")
-    st.columns(3)[1].metric("Expenses", f"{o:,.0f}")
+# Summary & History
+if not my_recs.empty:
+    i = my_recs[my_recs['Amount'] > 0]['Amount'].sum()
+    o = abs(my_recs[my_recs['Amount'] < 0]['Amount'].sum())
+    st.columns(3)[0].metric("In", f"{i:,.0f}")
+    st.columns(3)[1].metric("Out", f"{o:,.0f}")
     st.columns(3)[2].metric("Balance", f"{(i-o):,.0f}", delta=(i-o))
 
-# History
-if st.checkbox("📖 View History"):
-    st.dataframe(my_data.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
+if st.checkbox("📖 Show History"):
+    st.dataframe(my_recs.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
 
-# Logout
 if st.sidebar.button("Logout"):
     st.query_params.clear()
     st.session_state.update({'logged_in': False, 'username': ""})
