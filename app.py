@@ -6,9 +6,10 @@ from datetime import datetime
 st.set_page_config(page_title="Lifetime Ledger", layout="centered")
 st.title("💰 My Smart Ledger")
 
-# Google Sheets Connection (ttl=0 adds real-time updates)
+# Connection with 0 TTL to avoid caching issues
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
+# Load existing data
 try:
     df = conn.read()
 except Exception:
@@ -28,7 +29,7 @@ with st.form("transaction_form", clear_on_submit=True):
 
 if submit and person_name and amount > 0:
     final_amount = amount if t_type == "Received (+)" else -amount
-    new_row = {
+    new_row = pd.DataFrame([{
         "Name": person_name, 
         "Amount": final_amount, 
         "Currency": currency, 
@@ -36,15 +37,19 @@ if submit and person_name and amount > 0:
         "Date": datetime.now().strftime("%Y-%m-%d"), 
         "Time": datetime.now().strftime("%H:%M:%S"), 
         "Reason": reason
-    }
+    }])
     
-    # Naya data purane data mein add karna
-    updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    # Naya data purane mein add karein
+    updated_df = pd.concat([df, new_row], ignore_index=True)
     
-    # Google Sheet ko update karna
-    conn.update(data=updated_df)
-    st.success(f"Zabardast! {person_name} ka record save ho gaya.")
+    try:
+        # Data update karne ki koshish
+        conn.update(data=updated_df)
+        st.success(f"Zabardast! {person_name} ka record save ho gaya.")
+        st.balloons()
+    except Exception as e:
+        st.error("Error: Google Sheet ne data save nahi karne diya. Settings check karein.")
 
 if st.checkbox("Show History"):
-    # Fresh data read karke dikhana
-    st.dataframe(conn.read().sort_index(ascending=False))
+    history_df = conn.read()
+    st.dataframe(history_df.sort_index(ascending=False))
