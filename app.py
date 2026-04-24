@@ -61,21 +61,28 @@ st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}
 all_recs = conn.read(worksheet="Sheet1", ttl=0)
 my_recs = all_recs[all_recs['Owner'] == st.session_state['username']]
 
-# LIVE BALANCE FOR HEADER
-net_balance = my_recs['Amount'].sum() if not my_recs.empty else 0.0
+# --- LIVE BALANCE LOGIC ---
+total_received = 0.0
+total_withdrawn = 0.0
+net_balance = 0.0
 
-st.write(f"Total Available Balance")
-st.markdown(f"## PKR {net_balance:,.0f}")
+if not my_recs.empty:
+    total_received = my_recs[my_recs['Amount'] > 0]['Amount'].sum()
+    total_withdrawn = abs(my_recs[my_recs['Amount'] < 0]['Amount'].sum())
+    net_balance = total_received - total_withdrawn
+
+# Displaying the "Live Plus/Minus" Summary
+st.markdown("### 📊 Live Financial Summary")
+c1, c2, c3 = st.columns(3)
+c1.metric("Total Added (+)", f"{total_received:,.0f}")
+c2.metric("Total Withdraw (-)", f"{total_withdrawn:,.0f}")
+c3.metric("Current Balance", f"{net_balance:,.0f}", delta=net_balance)
 st.markdown("---")
 
 # --- TRANSACTION CONFIRMATION ---
 if st.session_state['confirm_mode']:
     preview = st.session_state['temp_data']
     st.warning("⚠️ **VERIFY BEFORE SAVING**")
-    
-    # Calculate Running Balance for the sheet
-    new_bal = net_balance + preview['Amount']
-    
     st.markdown(f"""
     <div class="confirm-card">
         <b>Name:</b> {preview['Name']}<br>
@@ -87,8 +94,6 @@ if st.session_state['confirm_mode']:
     
     cy, cn = st.columns(2)
     if cy.button("✅ Confirm & Add"):
-        # Add the Balance to the record
-        preview['Balance'] = new_bal
         conn.update(worksheet="Sheet1", data=pd.concat([all_recs, pd.DataFrame([preview])], ignore_index=True))
         st.success("Transaction Saved!")
         st.session_state.update({'confirm_mode': False, 'temp_data': None})
@@ -98,18 +103,19 @@ if st.session_state['confirm_mode']:
         st.rerun()
     st.stop()
 
-# --- ENTRY FORM (Wahi purana template) ---
-with st.expander("➕ Add New Transaction", expanded=True):
+# --- ENTRY FORM ---
+with st.expander("➕ New Entry", expanded=True):
     with st.form("entry_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         n_in = col1.text_input("Name")
-        a_in = col1.number_input("Amount", min_value=0.0, step=100.0)
+        a_in = col1.number_input("Amount (PKR)", min_value=0.0, step=500.0)
+        # UPDATED: "Withdraw" option added here
+        t_in = col2.radio("Action Type", ["Received (+)", "Withdraw (-)"])
+        r_in = st.text_input("Purpose / Reason")
         
-        t_in = col2.radio("Action", ["Received (+)", "Withdraw (-)"])
-        r_in = st.text_input("Reason / Remarks")
-        
-        if st.form_submit_button("Preview"):
+        if st.form_submit_button("Preview Transaction"):
             if n_in and a_in > 0:
+                # Logic: Positive if received, Negative if withdrawn
                 final_amt = a_in if t_in == "Received (+)" else -a_in
                 st.session_state['temp_data'] = {
                     "Owner": st.session_state['username'], 
@@ -118,18 +124,17 @@ with st.expander("➕ Add New Transaction", expanded=True):
                     "Type": t_in, 
                     "Date": datetime.now().strftime("%Y-%m-%d"), 
                     "Time": datetime.now().strftime("%H:%M:%S"), 
-                    "Reason": r_in,
-                    "Balance": 0.0 # Placeholder
+                    "Reason": r_in
                 }
                 st.session_state['confirm_mode'] = True
                 st.rerun()
+            else:
+                st.error("Please provide Name and Amount.")
 
 # History Table
-st.markdown(" ")
-show_history = st.checkbox("📖 View Transaction History", value=True)
-if show_history:
+if st.checkbox("📖 View Detailed History"):
     if not my_recs.empty:
-        st.dataframe(my_recs.sort_values(by=["Date", "Time"], ascending=[False, False]), use_container_width=True, hide_index=True)
+        st.dataframe(my_recs.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
 
 if st.sidebar.button("Logout"):
     st.query_params.clear()
