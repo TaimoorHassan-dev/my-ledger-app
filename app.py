@@ -3,21 +3,57 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="Lifetime Ledger", layout="centered")
-st.title("💰 My Smart Ledger")
+# Page configuration
+st.set_page_config(page_title="Lifetime Ledger", layout="centered", page_icon="💰")
 
-# --- LOGIN LOGIC ---
-# Aap apni marzi ka password yahan set kar sakte hain
-APP_PASSWORD = "taimur-ledger" 
+# --- CUSTOM CSS FOR PROFESSIONAL LOOK ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #0e1117;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #ff4b4b;
+        color: white;
+    }
+    .login-box {
+        padding: 2rem;
+        border-radius: 10px;
+        border: 1px solid #464b5d;
+        background-color: #161b22;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-user_pass = st.sidebar.text_input("Enter Password", type="password")
+# --- PASSWORD LOGIC ---
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
 
-if user_pass == APP_PASSWORD:
-    st.sidebar.success("Access Granted")
-    
-    conn = st.connection("gsheets", type=GSheetsConnection)
+def login():
+    if st.session_state['password_input'] == "taimur-ledger": # Aapka Password
+        st.session_state['authenticated'] = True
+    else:
+        st.error("❌ Ghalat Password! Dobara koshish karein.")
 
-    # --- INPUT FORM ---
+# --- LOGIN SCREEN ---
+if not st.session_state['authenticated']:
+    st.markdown("<h2 style='text-align: center;'>🔐 Secure Login</h2>", unsafe_allow_html=True)
+    with st.container():
+        st.text_input("Enter Password", type="password", key="password_input", on_change=login)
+        st.info("Mehfuz access ke liye password enter karein.")
+        st.stop() # Jab tak login nahi hoga, baqi code nahi chalega
+
+# --- ACTUAL APP (After Successful Login) ---
+st.markdown("<h1 style='text-align: center;'>💰 My Smart Ledger</h1>", unsafe_allow_html=True)
+st.success("✅ Welcome, Taimur!")
+
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# --- TRANSACTION FORM ---
+with st.expander("➕ Nayi Entry Karein", expanded=True):
     with st.form("transaction_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -33,37 +69,39 @@ if user_pass == APP_PASSWORD:
         reason = st.text_input("Reason / Purpose")
         submit = st.form_submit_button("Save Data")
 
-    if submit and person_name and amount > 0:
-        existing_df = conn.read(ttl=0)
-        final_amount = amount if t_type == "Received (+)" else -amount
-        
-        new_row = pd.DataFrame([{
-            "Name": person_name, 
-            "Amount": final_amount, 
-            "Currency": currency, 
-            "Type": t_type, 
-            "Date": manual_date.strftime("%Y-%m-%d"), 
-            "Time": manual_time.strftime("%H:%M:%S"), 
-            "Reason": reason
-        }])
-        
-        updated_df = pd.concat([existing_df, new_row], ignore_index=True)
-        
-        try:
-            conn.update(data=updated_df)
-            st.success(f"Record save ho gaya!")
-            st.balloons()
-        except Exception as e:
-            st.error("Error: Data save nahi ho saka.")
+if submit and person_name and amount > 0:
+    existing_df = conn.read(ttl=0)
+    final_amount = amount if t_type == "Received (+)" else -amount
+    
+    new_row = pd.DataFrame([{
+        "Name": person_name, 
+        "Amount": final_amount, 
+        "Currency": currency, 
+        "Type": t_type, 
+        "Date": manual_date.strftime("%Y-%m-%d"), 
+        "Time": manual_time.strftime("%H:%M:%S"), 
+        "Reason": reason
+    }])
+    
+    updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+    
+    try:
+        conn.update(data=updated_df)
+        st.success(f"Record save ho gaya!")
+        st.balloons()
+    except:
+        st.error("Error: Data save nahi ho saka.")
 
-    # --- HISTORY SECTION ---
-    if st.checkbox("Show History"):
-        history_df = conn.read(ttl=0)
-        if not history_df.empty:
-            st.dataframe(history_df.sort_values(by=["Date", "Time"], ascending=False))
-
-else:
-    if user_pass != "":
-        st.error("Ghalat Password! Dobara koshish karein.")
+# --- HISTORY SECTION ---
+st.markdown("---")
+if st.checkbox("📖 Show Transaction History"):
+    history_df = conn.read(ttl=0)
+    if not history_df.empty:
+        st.dataframe(history_df.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True)
     else:
-        st.info("Sidebar mein password enter karein taake aap ledger use kar sakein.")
+        st.info("Abhi tak koi records nahi hain.")
+
+# Logout Button in Sidebar
+if st.sidebar.button("Logout"):
+    st.session_state['authenticated'] = False
+    st.rerun()
