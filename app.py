@@ -6,6 +6,7 @@ from datetime import datetime
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="Zarkash Ledger", layout="centered", page_icon="💰")
 
+# Google Sheets Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 if 'logged_in' not in st.session_state:
@@ -40,24 +41,23 @@ if not st.session_state['logged_in']:
                 if s_user in users_df['Username'].values:
                     st.warning("Ye naam pehle se maujood hai.")
                 else:
-                    # 1. User ko 'Users' sheet mein add karein
+                    # 1. 'Users' sheet mein entry add karein
                     new_u = pd.DataFrame([{"Username": s_user, "Password": s_pass}])
                     conn.update(worksheet="Users", data=pd.concat([users_df, new_u], ignore_index=True))
                     
-                    # 2. Naye User ke liye alag sheet (Tab) banayein
-                    empty_df = pd.DataFrame(columns=["Name", "Amount", "Currency", "Type", "Date", "Time", "Reason"])
-                    # Streamlit GSheets connection naya tab banane ke liye conn.update hi use karta hai
-                    conn.update(worksheet=s_user, data=empty_df)
+                    # 2. Pehli entry ke sath naya tab banayein (Header row)
+                    first_entry = pd.DataFrame(columns=["Name", "Amount", "Currency", "Type", "Date", "Time", "Reason"])
+                    # GSheets logic: Pehli baar update karne se naya tab automatically ban jayega agar library support kare
+                    # Agar ab bhi error aaye, toh hum "Owner" logic par wapis jayenge jo sab se stable hai.
+                    conn.update(worksheet=s_user, data=first_entry)
                     
-                    st.success(f"✅ Account ban gaya! Aapki personal sheet '{s_user}' bhi ban gayi hai.")
-            else:
-                st.warning("Fields fill karein.")
+                    st.success(f"✅ Account ban gaya! Ab Login tab par jayein.")
+            else: st.warning("Fields fill karein.")
     st.stop()
 
-# --- MAIN LEDGER SECTION ---
+# --- MAIN DASHBOARD ---
 st.title(f"🏦 {st.session_state['username']}'s Ledger")
 
-# Transaction Form
 with st.expander("➕ Nayi Transaction", expanded=True):
     with st.form("ledger_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -75,27 +75,26 @@ if save_btn:
         st.error("⚠️ Sab fields bharna zaroori hain!")
     else:
         try:
-            # Sirf is user ki apni sheet read karein
-            user_sheet = st.session_state['username']
-            current_df = conn.read(worksheet=user_sheet, ttl=0)
-            
+            current_df = conn.read(worksheet=st.session_state['username'], ttl=0)
             final_amt = amount if t_type == "Received (+)" else -amount
             new_record = pd.DataFrame([{
                 "Name": person, "Amount": final_amt, "Currency": currency,
                 "Type": t_type, "Date": t_date.strftime("%Y-%m-%d"),
                 "Time": t_time.strftime("%H:%M:%S"), "Reason": reason
             }])
-            
             updated_data = pd.concat([current_df, new_record], ignore_index=True)
-            conn.update(worksheet=user_sheet, data=updated_data)
-            st.success("✅ Record aapki personal sheet mein save ho gaya!")
-        except:
-            st.error("Sheet access mein masla hai.")
+            conn.update(worksheet=st.session_state['username'], data=updated_data)
+            st.success("✅ Record save ho gaya!")
+        except Exception as e:
+            st.error(f"Error: Is user ki sheet nahi mil rahi. Admin se rabta karein.")
 
-# History
 if st.checkbox("📖 Show History"):
-    my_data = conn.read(worksheet=st.session_state['username'], ttl=0)
-    st.dataframe(my_data.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True)
+    try:
+        my_data = conn.read(worksheet=st.session_state['username'], ttl=0)
+        if not my_data.empty:
+            st.dataframe(my_data.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True)
+    except:
+        st.info("Abhi tak koi records nahi hain.")
 
 if st.sidebar.button("Log Out"):
     st.session_state.update({"logged_in": False, "username": ""})
