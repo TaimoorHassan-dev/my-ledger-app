@@ -6,15 +6,10 @@ from datetime import datetime
 st.set_page_config(page_title="Lifetime Ledger", layout="centered")
 st.title("💰 My Smart Ledger")
 
-# Connection with 0 TTL to avoid caching issues
-conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+# Connection setup
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Load existing data
-try:
-    df = conn.read()
-except Exception:
-    df = pd.DataFrame(columns=['Name', 'Amount', 'Currency', 'Type', 'Date', 'Time', 'Reason'])
-
+# Form for entry
 with st.form("transaction_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -28,6 +23,9 @@ with st.form("transaction_form", clear_on_submit=True):
     submit = st.form_submit_button("Save Data")
 
 if submit and person_name and amount > 0:
+    # Latest data read karein pehle
+    existing_df = conn.read(ttl=0)
+    
     final_amount = amount if t_type == "Received (+)" else -amount
     new_row = pd.DataFrame([{
         "Name": person_name, 
@@ -39,17 +37,21 @@ if submit and person_name and amount > 0:
         "Reason": reason
     }])
     
-    # Naya data purane mein add karein
-    updated_df = pd.concat([df, new_row], ignore_index=True)
+    # Data merge karein
+    updated_df = pd.concat([existing_df, new_row], ignore_index=True)
     
     try:
-        # Data update karne ki koshish
         conn.update(data=updated_df)
         st.success(f"Zabardast! {person_name} ka record save ho gaya.")
         st.balloons()
     except Exception as e:
-        st.error("Error: Google Sheet ne data save nahi karne diya. Settings check karein.")
+        st.error("Error: Google Sheet ne data save nahi karne diya.")
 
+# --- History Section ---
 if st.checkbox("Show History"):
-    history_df = conn.read()
-    st.dataframe(history_df.sort_index(ascending=False))
+    # Yahan ttl=0 hona zaroori hai taake fresh data nazar aaye
+    history_df = conn.read(ttl=0)
+    if not history_df.empty:
+        st.dataframe(history_df.sort_index(ascending=False))
+    else:
+        st.info("Abhi tak koi history nahi hai.")
