@@ -6,49 +6,27 @@ from datetime import datetime
 # Page configuration
 st.set_page_config(page_title="Lifetime Ledger", layout="centered", page_icon="💰")
 
-# --- CUSTOM CSS FOR PROFESSIONAL LOOK ---
-st.markdown("""
-    <style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stButton>button {
-        width: 100%;
-        border-radius: 5px;
-        height: 3em;
-        background-color: #ff4b4b;
-        color: white;
-    }
-    .login-box {
-        padding: 2rem;
-        border-radius: 10px;
-        border: 1px solid #464b5d;
-        background-color: #161b22;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # --- PASSWORD LOGIC ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
-def login():
-    if st.session_state['password_input'] == "taimur-ledger": # Aapka Password
-        st.session_state['authenticated'] = True
-    else:
-        st.error("❌ Ghalat Password! Dobara koshish karein.")
-
 # --- LOGIN SCREEN ---
 if not st.session_state['authenticated']:
     st.markdown("<h2 style='text-align: center;'>🔐 Secure Login</h2>", unsafe_allow_html=True)
+    
+    # Login Form
     with st.container():
-        st.text_input("Enter Password", type="password", key="password_input", on_change=login)
-        st.info("Mehfuz access ke liye password enter karein.")
-        st.stop() # Jab tak login nahi hoga, baqi code nahi chalega
+        input_pass = st.text_input("Enter Password", type="password")
+        if st.button("Login"):
+            if input_pass == "taimur-ledger": # <--- Yeh aapka password hai
+                st.session_state['authenticated'] = True
+                st.rerun()
+            else:
+                st.error("❌ Ghalat Password! Dobara koshish karein.")
+    st.stop() 
 
 # --- ACTUAL APP (After Successful Login) ---
 st.markdown("<h1 style='text-align: center;'>💰 My Smart Ledger</h1>", unsafe_allow_html=True)
-st.success("✅ Welcome, Taimur!")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -98,8 +76,6 @@ if st.checkbox("📖 Show Transaction History"):
     history_df = conn.read(ttl=0)
     if not history_df.empty:
         st.dataframe(history_df.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True)
-    else:
-        st.info("Abhi tak koi records nahi hain.")
 
 # Logout Button in Sidebar
 if st.sidebar.button("Logout"):
