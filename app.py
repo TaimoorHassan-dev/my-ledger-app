@@ -35,7 +35,7 @@ if 'logged_in' not in st.session_state:
 if 'confirm_mode' not in st.session_state:
     st.session_state.update({'confirm_mode': False, 'temp_data': None})
 
-# --- 4. LOGIN & REGISTRATION (Wapis Add Kar Diya) ---
+# --- 4. LOGIN & REGISTRATION ---
 if not st.session_state['logged_in']:
     st.markdown("<h1 class='main-title'>🏦 ZARKASH LEDGER</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔐 Secure Login", "📝 Create Account"])
@@ -68,17 +68,29 @@ if not st.session_state['logged_in']:
     st.stop()
 
 # --- 5. MAIN DASHBOARD ---
-# Logout in Sidebar
-if st.sidebar.button("Logout 🚪"):
-    st.query_params.clear()
-    st.session_state.update({'logged_in': False, 'username': ""})
-    st.rerun()
-
-st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}'S LEDGER</h1>", unsafe_allow_html=True)
-
 # Fetch Ledger Data
 all_recs = conn.read(worksheet="Sheet1", ttl=0)
 my_recs = all_recs[all_recs['Owner'] == st.session_state['username']]
+
+# --- SIDEBAR FEATURE: INDIVIDUAL TOTALS ---
+with st.sidebar:
+    st.markdown("### 🚪 Account Session")
+    if st.button("Logout"):
+        st.query_params.clear()
+        st.session_state.update({'logged_in': False, 'username': ""})
+        st.rerun()
+    
+    st.markdown("---")
+    st.markdown("### 👥 Person-wise Totals")
+    if not my_recs.empty:
+        # Har bande ka balance calculate kar ke sidebar mein dikhana
+        person_totals = my_recs.groupby('Name')['Amount'].sum().reset_index()
+        person_totals.columns = ['Name', 'Total Balance']
+        st.dataframe(person_totals, hide_index=True)
+    else:
+        st.info("No records found to calculate totals.")
+
+st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}'S LEDGER</h1>", unsafe_allow_html=True)
 
 # Balance Calculations
 total_received = my_recs[my_recs['Amount'] > 0]['Amount'].sum() if not my_recs.empty else 0.0
@@ -98,7 +110,10 @@ if st.session_state['confirm_mode']:
     preview = st.session_state['temp_data']
     st.warning("⚠️ **VERIFY DETAILS**")
     
-    updated_running_bal = net_balance + preview['Amount']
+    # Calculate balance specific to THIS person for the sheet
+    person_history = my_recs[my_recs['Name'] == preview['Name']]
+    current_person_bal = person_history['Amount'].sum() if not person_history.empty else 0.0
+    updated_running_bal = current_person_bal + preview['Amount']
     
     st.markdown(f"""
     <div class="confirm-card">
@@ -122,14 +137,13 @@ if st.session_state['confirm_mode']:
         st.rerun()
     st.stop()
 
-# --- 7. ENTRY FORM (Auto Date/Time) ---
+# --- 7. ENTRY FORM ---
 with st.expander("➕ Add New Transaction", expanded=True):
     with st.form("entry_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         n_in = col1.text_input("Name")
         a_in = col1.number_input("Amount", min_value=0.0)
         
-        # Manually editable but defaults to TODAY
         d_in = col2.date_input("Date", datetime.now())
         t_in_val = col2.time_input("Time", datetime.now().time())
         
