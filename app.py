@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+import plotly.express as px # Graph ke liye mandatory hai
 
 # --- 1. APP CONFIG ---
 st.set_page_config(page_title="Zarkash Ledger", layout="centered", page_icon="💰")
@@ -34,31 +35,18 @@ if 'confirm_mode' not in st.session_state:
 
 if not st.session_state['logged_in']:
     st.markdown("<h1 class='main-title'>🏦 ZARKASH LEDGER</h1>", unsafe_allow_html=True)
-    tab_log, tab_reg = st.tabs(["🔐 Login", "📝 Register"])
-    with tab_log:
-        u = st.text_input("Username", key="l_u")
-        p = st.text_input("Password", type="password", key="l_p")
-        if st.button("Enter Dashboard"):
-            users = conn.read(worksheet="Users", ttl=0)
-            if not users.empty and u in users['Username'].values:
-                if str(p) == str(users[users['Username'] == u]['Password'].values[0]):
-                    st.session_state.update({'logged_in': True, 'username': u})
-                    st.rerun()
-            else: st.error("Invalid Credentials")
-    with tab_reg:
-        nu = st.text_input("New Username", key="r_u")
-        np = st.text_input("New Password", type="password", key="r_p")
-        if st.button("Register"):
-            if nu and np:
-                users = conn.read(worksheet="Users", ttl=0)
-                new_user = pd.concat([users, pd.DataFrame([{"Username": nu, "Password": np}])], ignore_index=True)
-                conn.update(worksheet="Users", data=new_user)
-                st.success("Account Created!")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    if st.button("Enter Dashboard"):
+        users = conn.read(worksheet="Users", ttl=0)
+        if not users.empty and u in users['Username'].values:
+            if str(p) == str(users[users['Username'] == u]['Password'].values[0]):
+                st.session_state.update({'logged_in': True, 'username': u})
+                st.rerun()
     st.stop()
 
-# --- 4. MAIN DASHBOARD ---
+# --- 4. DATA LOADING ---
 all_recs = conn.read(worksheet="Sheet1", ttl=0)
-# Data cleaning for date
 if not all_recs.empty:
     all_recs['Date'] = pd.to_datetime(all_recs['Date'], errors='coerce')
     all_recs = all_recs.dropna(subset=['Date'])
@@ -83,17 +71,14 @@ with tab_personal:
         preview = st.session_state['temp_data']
         st.warning("⚠️ **VERIFY DETAILS**")
         st.markdown(f"""<div class="confirm-card"><b>Name:</b> {preview['Name']}<br><b>Amount:</b> PKR {abs(preview['Amount']):,.0f}<br><b>Action:</b> {preview['Type']}</div>""", unsafe_allow_html=True)
-        
         cy, cn = st.columns(2)
         if cy.button("✅ Confirm & Save"):
-            # Yahan hum fresh data read kar rahay hain taake overwriting na ho
             fresh_recs = conn.read(worksheet="Sheet1", ttl=0)
             preview['Balance'] = net_bal + preview['Amount']
             updated_df = pd.concat([fresh_recs, pd.DataFrame([preview])], ignore_index=True)
             conn.update(worksheet="Sheet1", data=updated_df)
             st.session_state.update({'confirm_mode': False, 'temp_data': None})
-            st.success("Saved!")
-            st.rerun()
+            st.success("Saved!"); st.rerun()
         if cn.button("❌ Edit"):
             st.session_state.update({'confirm_mode': False, 'temp_data': None}); st.rerun()
     else:
@@ -120,14 +105,32 @@ with tab_personal:
     if not my_recs.empty:
         st.dataframe(my_recs.sort_values(by=["Date", "Time"], ascending=False), use_container_width=True, hide_index=True)
 
+# --- MASTER LOGIC AREA WITH ANALYSIS ---
 with tab_master:
     st.markdown("### 🏛️ Back-hand Master Logic")
     if not all_recs.empty:
+        # Total Cash Metric
         total_pool = all_recs['Amount'].sum()
         st.metric("Total System Cash", f"PKR {total_pool:,.0f}")
-        summary = all_recs.groupby('Owner')['Amount'].sum().reset_index()
-        summary.columns = ['Username', 'Total Balance']
-        st.table(summary)
+        
+        # 📈 NEW ANALYSIS FEATURE: Top Senders
+        st.markdown("#### 🏆 Top User Analysis")
+        # Sirf positive transactions (Received) count karein
+        sent_data = all_recs[all_recs['Amount'] > 0].groupby('Owner')['Amount'].sum().reset_index()
+        sent_data = sent_data.sort_values(by='Amount', ascending=False)
+        
+        if not sent_data.empty:
+            fig = px.bar(sent_data, x='Owner', y='Amount', 
+                         title="Most Active Senders (Total PKR Received)",
+                         labels={'Owner': 'User', 'Amount': 'Total Money Sent'},
+                         color='Amount', color_continuous_scale='Sunset')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Ranking Table
+            st.write("#### Ranking Table")
+            st.table(sent_data.rename(columns={'Owner': 'User', 'Amount': 'Total Contribution'}))
+        else:
+            st.info("No transaction data available for analysis.")
 
 if st.button("Logout"):
     st.session_state.clear(); st.rerun()
