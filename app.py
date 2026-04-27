@@ -10,7 +10,7 @@ st.set_page_config(
     page_icon="💰"
 )
 
-# --- 2. UI STYLING (Aapki screenshots ke mutabiq) ---
+# --- 2. UI STYLING (Aapke original design ke mutabiq) ---
 st.markdown("""
     <style>
     header, footer, .stDeployButton, #MainMenu {visibility: hidden !important; display: none !important;}
@@ -19,8 +19,6 @@ st.markdown("""
     .stButton>button { width: 100%; border-radius: 8px; background-color: #FFD700; color: black; font-weight: bold; height: 45px; }
     .confirm-card { background-color: #161a25; padding: 20px; border: 1px solid #333; border-radius: 10px; }
     [data-testid="stMetricValue"] { font-size: 32px; font-weight: bold; }
-    /* Naya section style */
-    .master-logic { background-color: #1e2632; padding: 15px; border-radius: 10px; border-left: 5px solid #FFD700; margin-bottom: 20px;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -69,102 +67,102 @@ if not st.session_state['logged_in']:
                     st.success("Account Created! Please Login.")
     st.stop()
 
-# --- 5. MAIN DASHBOARD ---
+# --- 5. MASTER LOGIC TOGGLE (Sidebar Navigation) ---
+st.sidebar.markdown(f"### 👤 {st.session_state['username'].upper()}")
+# Naya feature toggle
+view_mode = st.sidebar.radio("Switch View", ["My Dashboard", "Master Pool Logic"])
+
 if st.sidebar.button("Logout 🚪"):
     st.query_params.clear()
     st.session_state.update({'logged_in': False, 'username': ""})
     st.rerun()
 
-st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}'S LEDGER</h1>", unsafe_allow_html=True)
-
-# Fetch All Ledger Data (Back-hand tracking ke liye)
+# Data Load
 all_recs = conn.read(worksheet="Sheet1", ttl=0)
 my_recs = all_recs[all_recs['Owner'] == st.session_state['username']]
 
-# Master Pool Logic (Jitni total rakam add ho chuki hai)
-master_pool_total = all_recs['Amount'].sum() if not all_recs.empty else 0.0
-
-with st.sidebar:
-    st.markdown("### 🏛️ Back-hand Master Logic")
-    st.info(f"Total Combined Balance: \n**PKR {master_pool_total:,.0f}**")
-
-# Balance Calculations (Individual User)
-total_received = my_recs[my_recs['Amount'] > 0]['Amount'].sum() if not my_recs.empty else 0.0
-total_sent = abs(my_recs[my_recs['Amount'] < 0]['Amount'].sum()) if not my_recs.empty else 0.0
-net_balance = total_received - total_sent
-
-# Account Status UI
-st.markdown("### 📊 Account Status")
-c1, c2 = st.columns(2)
-c1.metric("Received", f"{total_received:,.0f}")
-c2.metric("Sent", f"{total_sent:,.0f}")
-st.metric("Net Balance", f"{net_balance:,.0f}", delta=net_balance)
-st.markdown("---")
-
-# --- 6. TRANSACTION CONFIRMATION ---
-if st.session_state['confirm_mode']:
-    preview = st.session_state['temp_data']
-    st.warning("⚠️ **VERIFY DETAILS**")
+# --- CASE 1: MASTER POOL LOGIC (Naya Feature) ---
+if view_mode == "Master Pool Logic":
+    st.markdown("<h1 class='main-title'>🏛️ BACK-HAND MASTER POOL</h1>", unsafe_allow_html=True)
     
-    # Isme Individual balance update hoga
-    updated_running_bal = net_balance + preview['Amount']
+    # Sab owners ka total jama
+    total_pool = all_recs['Amount'].sum() if not all_recs.empty else 0.0
+    st.metric("Total Back-hand Cash", f"PKR {total_pool:,.0f}")
     
-    st.markdown(f"""
-    <div class="confirm-card">
-        <b>Name:</b> {preview['Name']}<br>
-        <b>Amount:</b> PKR {abs(preview['Amount']):,.0f}<br>
-        <b>Action:</b> {preview['Type']}<br>
-        <b>Date:</b> {preview['Date']} | <b>Time:</b> {preview['Time']}<br>
-        <b>Reason:</b> {preview['Reason']}
-    </div>
-    """, unsafe_allow_html=True)
-    
-    cy, cn = st.columns(2)
-    if cy.button("✅ Confirm & Save"):
-        preview['Balance'] = updated_running_bal
-        conn.update(worksheet="Sheet1", data=pd.concat([all_recs, pd.DataFrame([preview])], ignore_index=True))
-        st.success("Transaction Saved!")
-        st.session_state.update({'confirm_mode': False, 'temp_data': None})
-        st.rerun()
-    if cn.button("❌ Edit"):
-        st.session_state.update({'confirm_mode': False, 'temp_data': None})
-        st.rerun()
-    st.stop()
+    st.markdown("---")
+    st.write("### 👥 All Registered Owners Summary")
+    if not all_recs.empty:
+        # Group by owner to see each person's total
+        summary = all_recs.groupby('Owner')['Amount'].sum().reset_index()
+        summary.columns = ['Owner Username', 'Net Contribution']
+        st.table(summary)
+    else:
+        st.info("No data available in the system.")
 
-# --- 7. ENTRY FORM (Fixing Time Conflict) ---
-with st.expander("➕ Add New Transaction", expanded=True):
-    with st.form("entry_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        n_in = col1.text_input("Name")
-        a_in = col1.number_input("Amount", min_value=0.0)
-        
-        # Fixing the Time Sync: Using manual selection but properly formatted
-        d_in = col2.date_input("Date", datetime.now())
-        t_in_val = col2.time_input("Time", datetime.now().time())
-        
-        type_in = st.radio("Action", ["Received (+)", "Withdraw (-)"], horizontal=True)
-        r_in = st.text_input("Reason / Remarks")
-        
-        if st.form_submit_button("Preview"):
-            if n_in and a_in > 0:
-                final_amt = a_in if type_in == "Received (+)" else -a_in
-                
-                # Format time string carefully to avoid backend conflicts
-                formatted_time = t_in_val.strftime("%H:%M:%S")
-                
-                st.session_state['temp_data'] = {
-                    "Owner": st.session_state['username'], 
-                    "Name": n_in, "Amount": final_amt, "Currency": "PKR",
-                    "Type": type_in, 
-                    "Date": d_in.strftime("%Y-%m-%d"), 
-                    "Time": formatted_time, 
-                    "Reason": r_in,
-                    "Balance": 0.0
-                }
-                st.session_state['confirm_mode'] = True
-                st.rerun()
+# --- CASE 2: ORIGINAL DASHBOARD (No Changes) ---
+else:
+    st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}'S LEDGER</h1>", unsafe_allow_html=True)
 
-# --- 8. HISTORY TABLE ---
-st.markdown("### 📖 View History")
-if not my_recs.empty:
-    st.dataframe(my_recs.sort_values(by=["Date", "Time"], ascending=[False, False]), use_container_width=True, hide_index=True)
+    # Individual calculations (Same as before)
+    total_received = my_recs[my_recs['Amount'] > 0]['Amount'].sum() if not my_recs.empty else 0.0
+    total_sent = abs(my_recs[my_recs['Amount'] < 0]['Amount'].sum()) if not my_recs.empty else 0.0
+    net_balance = total_received - total_sent
+
+    st.markdown("### 📊 Account Status")
+    c1, c2 = st.columns(2)
+    c1.metric("Received", f"{total_received:,.0f}")
+    c2.metric("Sent", f"{total_sent:,.0f}")
+    st.metric("Net Balance", f"{net_balance:,.0f}", delta=net_balance)
+    st.markdown("---")
+
+    # Transaction Confirmation
+    if st.session_state['confirm_mode']:
+        preview = st.session_state['temp_data']
+        st.warning("⚠️ **VERIFY DETAILS**")
+        updated_running_bal = net_balance + preview['Amount']
+        st.markdown(f"""
+        <div class="confirm-card">
+            <b>Name:</b> {preview['Name']}<br>
+            <b>Amount:</b> PKR {abs(preview['Amount']):,.0f}<br>
+            <b>Action:</b> {preview['Type']}<br>
+            <b>Date:</b> {preview['Date']} | <b>Time:</b> {preview['Time']}<br>
+            <b>Reason:</b> {preview['Reason']}
+        </div>
+        """, unsafe_allow_html=True)
+        cy, cn = st.columns(2)
+        if cy.button("✅ Confirm & Save"):
+            preview['Balance'] = updated_running_bal
+            conn.update(worksheet="Sheet1", data=pd.concat([all_recs, pd.DataFrame([preview])], ignore_index=True))
+            st.success("Transaction Saved!")
+            st.session_state.update({'confirm_mode': False, 'temp_data': None})
+            st.rerun()
+        if cn.button("❌ Edit"):
+            st.session_state.update({'confirm_mode': False, 'temp_data': None})
+            st.rerun()
+        st.stop()
+
+    # Form (Wahi purana)
+    with st.expander("➕ Add New Transaction", expanded=True):
+        with st.form("entry_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            n_in = col1.text_input("Name")
+            a_in = col1.number_input("Amount", min_value=0.0)
+            d_in = col2.date_input("Date", datetime.now())
+            t_in_val = col2.time_input("Time", datetime.now().time())
+            type_in = st.radio("Action", ["Received (+)", "Withdraw (-)"], horizontal=True)
+            r_in = st.text_input("Reason / Remarks")
+            if st.form_submit_button("Preview"):
+                if n_in and a_in > 0:
+                    final_amt = a_in if type_in == "Received (+)" else -a_in
+                    st.session_state['temp_data'] = {
+                        "Owner": st.session_state['username'], "Name": n_in, "Amount": final_amt, 
+                        "Currency": "PKR", "Type": type_in, "Date": d_in.strftime("%Y-%m-%d"), 
+                        "Time": t_in_val.strftime("%H:%M:%S"), "Reason": r_in, "Balance": 0.0
+                    }
+                    st.session_state['confirm_mode'] = True
+                    st.rerun()
+
+    # History Table (Wahi purana)
+    st.markdown("### 📖 View History")
+    if not my_recs.empty:
+        st.dataframe(my_recs.sort_values(by=["Date", "Time"], ascending=[False, False]), use_container_width=True, hide_index=True)
