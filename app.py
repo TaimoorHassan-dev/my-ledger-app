@@ -2,12 +2,11 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
-import plotly.express as px # Analysis graph ke liye zaroori hai
 
 # --- 1. APP CONFIG ---
 st.set_page_config(page_title="Zarkash Ledger", layout="centered", page_icon="💰")
 
-# --- 2. UI STYLING (Aapke original design ke mutabiq) ---
+# --- 2. UI STYLING ---
 st.markdown("""
     <style>
     header, footer, .stDeployButton, #MainMenu {visibility: hidden !important; display: none !important;}
@@ -15,7 +14,6 @@ st.markdown("""
     .stButton>button { width: 100%; border-radius: 8px; background-color: #FFD700; color: black; font-weight: bold; height: 45px; }
     .confirm-card { background-color: #161a25; padding: 20px; border: 1px solid #333; border-radius: 10px; }
     [data-testid="stMetricValue"] { font-size: 32px; font-weight: bold; }
-    /* Tabs for better navigation without sidebar */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; justify-content: center; }
     .stTabs [data-baseweb="tab"] { background-color: #161a25; border-radius: 5px; padding: 10px 20px; color: white; }
     </style>
@@ -63,30 +61,23 @@ if not st.session_state['logged_in']:
 # --- 4. MAIN DASHBOARD ---
 st.markdown(f"<h1 class='main-title'>🏦 {st.session_state['username'].upper()}'S LEDGER</h1>", unsafe_allow_html=True)
 
-# Tabs added so Master Logic is visible
 tab_personal, tab_master = st.tabs(["📊 My Ledger", "🏛️ Master Logic"])
 
 all_recs = conn.read(worksheet="Sheet1", ttl=0)
-
-# Date cleaning fix (taake graph mein masla na aaye)
-if not all_recs.empty:
-    all_recs['Date'] = pd.to_datetime(all_recs['Date'], errors='coerce')
-
-my_recs = all_recs[all_recs['Owner'] == st.session_state['username']] if not all_recs.empty else pd.DataFrame()
+my_recs = all_recs[all_recs['Owner'] == st.session_state['username']]
 
 with tab_personal:
-    # Calculations
+    # Calculations - Sahi tareeqa
     t_rec = my_recs[my_recs['Amount'] > 0]['Amount'].sum() if not my_recs.empty else 0.0
     t_sent = abs(my_recs[my_recs['Amount'] < 0]['Amount'].sum()) if not my_recs.empty else 0.0
-    net_bal = t_rec - t_sent
+    net_bal = t_rec - t_sent # Sahi balance check
 
     st.markdown("### 📊 Status")
     c1, c2 = st.columns(2)
     c1.metric("Received", f"{t_rec:,.0f}")
     c2.metric("Sent", f"{t_sent:,.0f}")
-    st.metric("Net Balance", f"{net_bal:,.0f}")
+    st.metric("Net Balance", f"PKR {net_bal:,.0f}")
 
-    # --- 5. TRANSACTION CONFIRMATION ---
     if st.session_state['confirm_mode']:
         preview = st.session_state['temp_data']
         st.warning("⚠️ **VERIFY DETAILS**")
@@ -101,18 +92,21 @@ with tab_personal:
         
         cy, cn = st.columns(2)
         if cy.button("✅ Confirm & Save"):
-            # Fresh data read taake record save ho
-            fresh_recs = conn.read(worksheet="Sheet1", ttl=0)
-            preview['Balance'] = net_bal + preview['Amount']
-            conn.update(worksheet="Sheet1", data=pd.concat([fresh_recs, pd.DataFrame([preview])], ignore_index=True))
+            # BALANCE CORRECTION: Withdraw ke waqt minus hona chahiye
+            new_balance = net_bal + preview['Amount'] 
+            preview['Balance'] = new_balance
+            
+            # Fresh data read taake record overwrite na ho
+            fresh_all = conn.read(worksheet="Sheet1", ttl=0)
+            conn.update(worksheet="Sheet1", data=pd.concat([fresh_all, pd.DataFrame([preview])], ignore_index=True))
+            
             st.session_state.update({'confirm_mode': False, 'temp_data': None})
-            st.success("Saved Successfully!")
+            st.success("Saved!")
             st.rerun()
         if cn.button("❌ Edit"):
             st.session_state.update({'confirm_mode': False, 'temp_data': None})
             st.rerun()
     else:
-        # Entry Form
         with st.expander("➕ Add Transaction", expanded=True):
             with st.form("entry_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
@@ -125,43 +119,32 @@ with tab_personal:
                 
                 if st.form_submit_button("Preview"):
                     if n_in and a_in > 0:
+                        # Logic: Agar withdraw hai toh amount ko negative store karein
+                        final_amt = a_in if type_in == "Received (+)" else -a_in
                         st.session_state['temp_data'] = {
                             "Owner": st.session_state['username'], "Name": n_in, 
-                            "Amount": a_in if type_in == "Received (+)" else -a_in, 
+                            "Amount": final_amt, 
                             "Currency": "PKR", "Type": type_in, "Date": d_in.strftime("%Y-%m-%d"), 
                             "Time": t_in.strftime("%H:%M:%S"), "Reason": r_in, "Balance": 0.0
                         }
                         st.session_state['confirm_mode'] = True
                         st.rerun()
 
-    # --- 6. HISTORY TABLE ---
     st.markdown("### 📖 View History")
     if not my_recs.empty:
         sorted_df = my_recs.sort_values(by=["Date", "Time"], ascending=[False, False])
         st.dataframe(sorted_df, use_container_width=True, hide_index=True)
 
 with tab_master:
-    # Master Logic functionality
     st.markdown("### 🏛️ Back-hand Master Logic")
+    # Yahan har user ka apna net balance sahi dikhayega
     total_pool = all_recs['Amount'].sum() if not all_recs.empty else 0.0
     st.metric("Total System Cash", f"PKR {total_pool:,.0f}")
     
     if not all_recs.empty:
-        # --- NEW ANALYSIS FEATURE ---
-        st.write("#### 📈 Deposit Analysis (Who sent most?)")
-        # Sirf positive (Received) amounts ka analysis
-        analysis_df = all_recs[all_recs['Amount'] > 0].groupby('Owner')['Amount'].sum().reset_index()
-        analysis_df = analysis_df.sort_values(by='Amount', ascending=False)
-        
-        if not analysis_df.empty:
-            fig = px.bar(analysis_df, x='Owner', y='Amount', 
-                         labels={'Owner': 'User', 'Amount': 'Total Deposit (PKR)'},
-                         color='Amount', color_continuous_scale='Sunset')
-            st.plotly_chart(fig, use_container_width=True)
-        
         st.write("#### User Wise Breakdown")
         summary = all_recs.groupby('Owner')['Amount'].sum().reset_index()
-        summary.columns = ['Username', 'Total Balance']
+        summary.columns = ['Username', 'Total Net Balance']
         st.table(summary)
 
 if st.button("Logout"):
